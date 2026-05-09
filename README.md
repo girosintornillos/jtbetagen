@@ -8,21 +8,21 @@ Solo necesitas un compilador de C (GCC recomendado).
 
 En Linux
 
-gcc -O2 jtbetagen.c -o jtbetagen
+```gcc -O2 jtbetagen.c -o jtbetagen```
 
 En Windows (PowerShell/CMD con MinGW)
 
-gcc -O2 jtbetagen.c -o jtbetagen.exe
+```gcc -O2 jtbetagen.c -o jtbetagen.exe```
 
 Uso:
 
 Primero se debe averiguar que código CRC-32 utilizar, este CRC-32 se encuentra en los .mra beta:
 
-  <part name="beta.bin" crc="xxxxxxxx"/>
+```<part name="beta.bin" crc="xxxxxxxx"/>```
 
 Ejecuta el programa pasando el código CRC-32 en formato hexadecimal como argumento, en este ejemplo se usará el CRC-32 "032970d5":
 
-./jtbetagen 032970d5
+```./jtbetagen 032970d5```
 
 Resultado:
 
