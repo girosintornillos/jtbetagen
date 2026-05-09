@@ -1,5 +1,5 @@
 /*
- * Project: CRC32 to ZIP Byte Generator
+ * Project: jtbeta.zip File Generator
  * Description: Calculates the 4-byte sequence for a target CRC-32 and 
  *              generates a 'jtbeta.zip' containing a 'beta.bin' file.
  * 
