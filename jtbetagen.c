@@ -1,24 +1,14 @@
-/*
- * Project: jtbeta.zip File Generator
- * Description: Calculates the 4-byte sequence for a target CRC-32 and 
- *              generates a 'jtbeta.zip' containing a 'beta.bin' file.
- * 
- * Author: GiRo SiNToRNiLLoS™
- * Date: Mayo 2026
- * License: MIT
- * 
- * Notes: 
- * - Compatible with GCC (Linux/Windows).
- * - Uses a manual ZIP structure to avoid external library dependencies.
- * - Inverts the CRC-32 polynomial mapping in O(1).
- */
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
+#include <ctype.h>
 
-// Tablas para el cálculo directo e inverso del CRC-32
+// --- Constantes TorrentZip (24/12/1996 23:32:00) ---
+#define TRZ_TIME 0xBC00
+#define TRZ_DATE 0x2198
+
+// --- Tablas para el cálculo directo e inverso del CRC-32 ---
 uint32_t table[256];
 uint8_t revT[256];
 
@@ -30,37 +20,56 @@ void init_tables() {
             else c >>= 1;
         }
         table[i] = c;
-        // El byte más significativo de c es un mapeo 1:1, nos permite revertir el proceso
         revT[c >> 24] = i; 
     }
 }
 
-// Funciones auxiliares para escribir en Little-Endian (formato requerido por ZIP)
-void write_le32(FILE *f, uint32_t val) {
-    uint8_t buf[4] = { val & 0xFF, (val >> 8) & 0xFF, (val >> 16) & 0xFF, (val >> 24) & 0xFF };
-    fwrite(buf, 1, 4, f);
+// --- Función para calcular el CRC-32 del Central Directory ---
+uint32_t crc32_block(const uint8_t *data, size_t len) {
+    uint32_t crc = 0xFFFFFFFF;
+    for (size_t i = 0; i < len; i++) {
+        crc = (crc >> 8) ^ table[(crc ^ data[i]) & 0xFF];
+    }
+    return crc ^ 0xFFFFFFFF;
 }
 
-void write_le16(FILE *f, uint16_t val) {
-    uint8_t buf[2] = { val & 0xFF, (val >> 8) & 0xFF };
-    fwrite(buf, 1, 2, f);
+// --- Funciones auxiliares para escribir en Little-Endian (formato requerido por ZIP) ---
+void write_le32(uint8_t **p, uint32_t v) {
+    (*p)[0] = v & 0xFF; (*p)[1] = (v >> 8) & 0xFF;
+    (*p)[2] = (v >> 16) & 0xFF; (*p)[3] = (v >> 24) & 0xFF;
+    *p += 4;
+}
+
+void write_le16(uint8_t **p, uint16_t v) {
+    (*p)[0] = v & 0xFF; (*p)[1] = (v >> 8) & 0xFF;
+    *p += 2;
 }
 
 int main(int argc, char *argv[]) {
-    if (argc != 2) {
-        printf("Uso: %s <CRC32 en hex>\n", argv[0]);
-        printf("Ejemplo: %s 032970d5\n", argv[0]);
+    // --- Validar que contenga parámetro ---
+    if (argc != 2 || strlen(argv[1]) != 8) {
+        fprintf(stderr, "Uso: %s <CRC32 hex de 8 caracteres>\n", argv[0]);
         return 1;
     }
 
-    // Leer el CRC desde la línea de comandos
-    uint32_t target_crc = (uint32_t)strtoul(argv[1], NULL, 16);
+    // --- Validar longitud exacta (8 caracteres para un uint32_t hex) ---
+    if (strlen(argv[1]) != 8) {
+        fprintf(stderr, "Error: El CRC debe tener exactamente 8 caracteres hexadecimales.\n");
+        return 1;
+    }
 
+    // --- Validar que cada caracter sea hexadecimal ---
+    for (int i = 0; i < 8; i++) {
+        if (!isxdigit((unsigned char)argv[1][i])) {
+            fprintf(stderr, "Error: El valor '%s' contiene caracteres no hexadecimales.\n", argv[1]);
+            return 1;
+        }
+    }
+
+    uint32_t target_crc = (uint32_t)strtoul(argv[1], NULL, 16);
     init_tables();
 
-    // ---------------------------------------------------------
-    // ALGORITMO INVERSO PARA OBTENER LOS 4 BYTES DESDE EL CRC32
-    // ---------------------------------------------------------
+    // --- Algoritmo inverso para obtener los 4 bytes desde el CRC32 ---
     uint32_t S4 = target_crc ^ 0xFFFFFFFF;
 
     uint8_t b3 = S4 >> 24;
@@ -79,75 +88,94 @@ int main(int argc, char *argv[]) {
     uint8_t I0 = revT[b0];
 
     uint32_t S0 = 0xFFFFFFFF;
-    uint8_t B0 = (S0 & 0xFF) ^ I0;
+    uint8_t data[4];
+    data[0] = (S0 & 0xFF) ^ I0;
     uint32_t S1 = (S0 >> 8) ^ table[I0];
-    uint8_t B1 = (S1 & 0xFF) ^ I1;
+    data[1] = (S1 & 0xFF) ^ I1;
     uint32_t S2 = (S1 >> 8) ^ table[I1];
-    uint8_t B2 = (S2 & 0xFF) ^ I2;
+    data[2] = (S2 & 0xFF) ^ I2;
     uint32_t S3 = (S2 >> 8) ^ table[I2];
-    uint8_t B3 = (S3 & 0xFF) ^ I3;
+    data[3] = (S3 & 0xFF) ^ I3;
 
-    uint8_t data[4] = {B0, B1, B2, B3};
-    printf("Bytes calculados: %02X %02X %02X %02X\n", B0, B1, B2, B3);
+    printf("CRC Target: %08X -> Bytes Calculados: %02X %02X %02X %02X\n", target_crc, data[0], data[1], data[2], data[3]);
 
-    // ---------------------------------------------------------
-    // CREACIÓN DEL ARCHIVO ZIP (SIN COMPRESIÓN)
-    // ---------------------------------------------------------
+    // --- Preparación del archivo zip ---
     FILE *f = fopen("jtbeta.zip", "wb");
     if (!f) {
         printf("Error al crear jtbeta.zip\n");
         return 1;
     }
 
-    // 1. Local File Header (38 bytes)
-    write_le32(f, 0x04034b50); // Firma PK\x03\x04
-    write_le16(f, 10);         // Versión necesaria (1.0)
-    write_le16(f, 0);          // Flags
-    write_le16(f, 0);          // Compresión (0 = Store)
-    write_le16(f, 0x1400);     // Hora MS-DOS (02:32:00)
-    write_le16(f, 0x2199);     // Fecha MS-DOS (25/12/1996)
-    write_le32(f, target_crc); // CRC-32 de los datos
-    write_le32(f, 4);          // Tamaño comprimido
-    write_le32(f, 4);          // Tamaño real
-    write_le16(f, 8);          // Longitud del nombre
-    write_le16(f, 0);          // Longitud extra
-    fwrite("beta.bin", 1, 8, f); // Nombre del archivo (8 bytes)
+    // --- Local File Header ---
+    uint8_t lfh[30];
+    uint8_t *ptr = lfh;
+    write_le32(&ptr, 0x04034b50); 
+    write_le16(&ptr, 10);
+    write_le16(&ptr, 0);
+    write_le16(&ptr, 0);
+    write_le16(&ptr, TRZ_TIME);
+    write_le16(&ptr, TRZ_DATE);
+    write_le32(&ptr, target_crc); 
+    write_le32(&ptr, 4);
+    write_le32(&ptr, 4);
+    write_le16(&ptr, 8);
+    write_le16(&ptr, 0);
+    fwrite(lfh, 1, 30, f);
+    fwrite("beta.bin", 1, 8, f);
 
-    // 2. Data (4 bytes)
-    fwrite(data, 1, 4, f);     // Los bytes generados
+    // --- Data (4 bytes) ---
+    fwrite(data, 1, 4, f);
 
-    // 3. Central Directory Header (54 bytes)
-    write_le32(f, 0x02014b50); // Firma PK\x01\x02
-    write_le16(f, 20);         // Versión del creador (2.0)
-    write_le16(f, 10);         // Versión necesaria
-    write_le16(f, 0);          // Flags
-    write_le16(f, 0);          // Compresión (Store)
-    write_le16(f, 0x1400);     // Hora MS-DOS (02:32:00)
-    write_le16(f, 0x2199);     // Fecha MS-DOS (25/12/1996)
-    write_le32(f, target_crc); // CRC-32
-    write_le32(f, 4);          // Tamaño comprimido
-    write_le32(f, 4);          // Tamaño real
-    write_le16(f, 8);          // Longitud del nombre
-    write_le16(f, 0);          // Campo extra
-    write_le16(f, 0);          // Comentario
-    write_le16(f, 0);          // Número de disco
-    write_le16(f, 0);          // Atributos internos
-    write_le32(f, 0);          // Atributos externos
-    write_le32(f, 0);          // Offset del Local Header (0)
-    fwrite("beta.bin", 1, 8, f); // Nombre del archivo
+    // --- Central Directory ---
+    // --- Construcción del Central Directory ---
+    uint8_t cd[54];
+    uint8_t *ptr_cd = cd;
 
-    // 4. End of Central Directory Record (22 bytes)
-    write_le32(f, 0x06054b50); // Firma PK\x05\x06
-    write_le16(f, 0);          // Disco
-    write_le16(f, 0);          // Disco inicio CD
-    write_le16(f, 1);          // Registros CD en este disco
-    write_le16(f, 1);          // Registros CD totales
-    write_le32(f, 54);         // Tamaño del Central Directory (46 fijo + 8 nombre)
-    write_le32(f, 42);         // Offset del Central Directory (38 Local Header + 4 Data)
-    write_le16(f, 0);          // Tamaño comentario del ZIP
+    write_le32(&ptr_cd, 0x02014b50);
+    write_le16(&ptr_cd, 20);
+    write_le16(&ptr_cd, 10);
+    write_le16(&ptr_cd, 0);
+    write_le16(&ptr_cd, 0);
+    write_le16(&ptr_cd, TRZ_TIME);
+    write_le16(&ptr_cd, TRZ_DATE);
+    write_le32(&ptr_cd, target_crc);
+    write_le32(&ptr_cd, 4);
+    write_le32(&ptr_cd, 4);
+    write_le16(&ptr_cd, 8);
+    write_le16(&ptr_cd, 0);
+    write_le16(&ptr_cd, 0);
+    write_le16(&ptr_cd, 0);
+    write_le16(&ptr_cd, 0);
+    write_le32(&ptr_cd, 0);
+    write_le32(&ptr_cd, 0);
+    memcpy(ptr_cd, "beta.bin", 8);
+
+    // --- Cálculo del CRC del Central Directory ---
+    uint32_t cd_crc = crc32_block(cd, 54);
+
+    // --- Preparación del Comentario Final ---
+    char comment[23];
+    sprintf(comment, "TORRENTZIPPED-%08X", cd_crc);
+
+    // --- End of Central Directory (EOCD) ---
+    uint8_t eocd[22];
+    uint8_t *ptr_e = eocd;
+
+    write_le32(&ptr_e, 0x06054b50);
+    write_le16(&ptr_e, 0);
+    write_le16(&ptr_e, 0);
+    write_le16(&ptr_e, 1);
+    write_le16(&ptr_e, 1);
+    write_le32(&ptr_e, 54);
+    write_le32(&ptr_e, 42);
+    write_le16(&ptr_e, 22);
+
+    // --- Escritura Final ---
+    fwrite(cd, 1, 54, f);
+    fwrite(eocd, 1, 22, f);
+    fwrite(comment, 1, 22, f);
 
     fclose(f);
-
-    printf("Archivo 'jtbeta.zip' generado con exito (conteniendo beta.bin).\n");
+    printf("Archivo 'jtbeta.zip' generado con exito.\n");
     return 0;
 }
