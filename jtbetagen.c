@@ -1,3 +1,18 @@
+/*
+ * Project: jtbeta.zip File Generator
+ * Description: Calculates the 4-byte sequence for a target CRC-32 and 
+ *              generates a 'jtbeta.zip' containing a 'beta.bin' file.
+ * 
+ * Author: GiRo SiNToRNiLLoS™
+ * Date: Mayo 2026
+ * License: MIT
+ * 
+ * Notes: 
+ * - Compatible with GCC (Linux/Windows).
+ * - Uses a manual ZIP structure to avoid external library dependencies.
+ * - Inverts the CRC-32 polynomial mapping in O(1).
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
