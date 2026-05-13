@@ -151,9 +151,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     hr = CoCreateInstance(&CLSID_FileOpenDialog, NULL, CLSCTX_ALL, &IID_IFileOpenDialog, (void**)&pfd);
     
     if (SUCCEEDED(hr)) {
-		pfd->lpVtbl->SetFileTypes(pfd, 1, rgSpec);
         pfd->lpVtbl->SetTitle(pfd, L"Seleccionar archivo MRA");
         COMDLG_FILTERSPEC rgSpec[] = {{L"MiSTer Arcade Files", L"*.mra"}};
+		pfd->lpVtbl->SetFileTypes(pfd, 1, rgSpec);
 
         hr = pfd->lpVtbl->Show(pfd, NULL);
         if (SUCCEEDED(hr)) {
