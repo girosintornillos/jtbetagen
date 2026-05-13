@@ -8,7 +8,7 @@ Solo necesitas un compilador de C en Windows (GCC recomendado).
 
 PowerShell/CMD con MinGW:
 
-```gcc jtbetagen.c resource.res -o jtbetagen.exe -lole32 -luuid -lcomdlg32 -mwindows```
+```gcc jtbetagen.c resource.res -o jtbetagen.exe -lole32 -luuid -mwindows```
 <br/>
 <br/>
 Uso:
@@ -22,10 +22,10 @@ Al ejecutar el programa solicitará abrir el archivo .mra beta:
 <br/>
 <br/>
 <br/>
-Después de abrir el archivo .mra beta solicitará guardar el archivo jtbeta.zip:
+Después de abrir el archivo .mra beta solicitará indicar la carpeta donde guardar el archivo jtbeta.zip:
 <br/>
 <br/>
-<img src="https://github.com/user-attachments/assets/e7149e32-e9d0-4b1a-bd43-65f2e698082a" />
+<img src="https://github.com/user-attachments/assets/eec2e092-53d7-4858-9e98-61f3d926ee28" />
 <br/>
 <br/>
 <br/>
