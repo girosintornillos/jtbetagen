@@ -150,7 +150,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     ofn.lStructSize = sizeof(ofn);
     ofn.lpstrFile = szFile;
     ofn.nMaxFile = sizeof(szFile);
-    ofn.lpstrFilter = "MiSTer Arcade Files (*.mra)\0*.mra\0All Files (*.*)\0*.*\0";
+    ofn.lpstrFilter = "MiSTer Arcade Files (*.mra)\0*.mra\0";
     ofn.nFilterIndex = 1;
     ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST;
 
