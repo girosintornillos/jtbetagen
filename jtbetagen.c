@@ -143,7 +143,7 @@ int get_crc_from_mra(const char* filename, uint32_t* target_crc) {
 }
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd) {
-    // --- Abrir archivo .mra y validar ---
+    // --- Abrir archivo .mra ---
     OPENFILENAMEA ofn;
     char szFile[260] = {0};
     ZeroMemory(&ofn, sizeof(ofn));
