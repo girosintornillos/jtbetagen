@@ -13,18 +13,16 @@
  * - Implements TorrentZip standard (UTC 1996-12-24 23:32:00) for deterministic output.
  */
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <stdint.h>
-#include <string.h>
-#include <ctype.h>
+#define COBJMACROS
 #include <windows.h>
-#include <commdlg.h>
+#include <shobjidl.h>
+#include <stdio.h>
+#include <stdint.h>
+#include <ctype.h>
 
-// --- Constantes TorrentZip (24/12/1996 23:32:00) ---
+// --- Constantes TorrentZip (24/12/1996 23:32:00) y Tablas ---
 #define TRZ_TIME 0xBC00
 #define TRZ_DATE 0x2198
-
 uint32_t table[256];
 uint8_t revT[256];
 
@@ -143,43 +141,87 @@ int get_crc_from_mra(const char* filename, uint32_t* target_crc) {
 }
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd) {
-    // --- Abrir archivo .mra ---
-    OPENFILENAMEA ofn;
-    char szFile[260] = {0};
-    ZeroMemory(&ofn, sizeof(ofn));
-    ofn.lStructSize = sizeof(ofn);
-    ofn.lpstrFile = szFile;
-    ofn.nMaxFile = sizeof(szFile);
-    ofn.lpstrFilter = "MiSTer Arcade Files (*.mra)\0*.mra\0";
-    ofn.nFilterIndex = 1;
-    ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST;
+    HRESULT hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+    if (FAILED(hr)) return 1;
 
-    if (!GetOpenFileNameA(&ofn)) return 0;
+	uint32_t target_crc = 0;
+	
+    // --- IFileOpenDialog para el .mra ---
+    IFileOpenDialog *pfd = NULL;
+    hr = CoCreateInstance(&CLSID_FileOpenDialog, NULL, CLSCTX_ALL, &IID_IFileOpenDialog, (void**)&pfd);
+    
+    if (SUCCEEDED(hr)) {
+		pfd->lpVtbl->SetFileTypes(pfd, 1, rgSpec);
+        pfd->lpVtbl->SetTitle(pfd, L"Seleccionar archivo MRA");
+        COMDLG_FILTERSPEC rgSpec[] = {{L"MiSTer Arcade Files", L"*.mra"}};
 
-    uint32_t target_crc;
-    if (!get_crc_from_mra(szFile, &target_crc)) {
-        MessageBoxA(NULL, "El archivo no contiene la l\xEDnea \"beta.bin\" con su CRC\no el CRC encontrado no es v\xE1lido.", "Error", MB_ICONERROR);
-        return 1;
+        hr = pfd->lpVtbl->Show(pfd, NULL);
+        if (SUCCEEDED(hr)) {
+            IShellItem *psi = NULL;
+            hr = pfd->lpVtbl->GetResult(pfd, &psi);
+            if (SUCCEEDED(hr)) {
+                LPWSTR pszFilePath = NULL;
+                psi->lpVtbl->GetDisplayName(psi, SIGDN_FILESYSPATH, &pszFilePath);
+                char mraPath[MAX_PATH];
+                wcstombs(mraPath, pszFilePath, MAX_PATH);
+                
+                if (!get_crc_from_mra(mraPath, &target_crc)) {
+                    MessageBoxA(NULL, "El archivo no contiene la l\xEDnea \"beta.bin\" con su CRC\no el CRC encontrado no es v\xE1lido.", "Error", MB_ICONERROR);
+                    CoTaskMemFree(pszFilePath); psi->lpVtbl->Release(psi); pfd->lpVtbl->Release(pfd);
+                    CoUninitialize();
+					return 0;
+                }
+                CoTaskMemFree(pszFilePath);
+                psi->lpVtbl->Release(psi);
+            }
+        }
+        pfd->lpVtbl->Release(pfd);
+    }
+    if (target_crc == 0) {
+		CoUninitialize();
+		return 0;
+	}
+
+    // --- IFileSaveDialog para el ZIP (Forzando nombre) ---
+    IFileSaveDialog *pfsd = NULL;
+    hr = CoCreateInstance(&CLSID_FileSaveDialog, NULL, CLSCTX_ALL, &IID_IFileSaveDialog, (void**)&pfsd);
+    char szSavePath[MAX_PATH] = {0};
+    
+    if (SUCCEEDED(hr)) {
+        pfsd->lpVtbl->SetFileName(pfsd, L"jtbeta.zip"); // PRE-FIJAR EL NOMBRE
+        pfsd->lpVtbl->SetTitle(pfsd, L"D\xA2nde guardar jtbeta.zip?");
+        COMDLG_FILTERSPEC rgSpecZip[] = {{L"ZIP Files", L"*.zip"}};
+        pfsd->lpVtbl->SetFileTypes(pfsd, 1, rgSpecZip);
+
+        hr = pfsd->lpVtbl->Show(pfsd, NULL);
+        if (SUCCEEDED(hr)) {
+            IShellItem *psi = NULL;
+            hr = pfsd->lpVtbl->GetResult(pfsd, &psi);
+            if (SUCCEEDED(hr)) {
+                LPWSTR pszSavePath = NULL;
+                psi->lpVtbl->GetDisplayName(psi, SIGDN_FILESYSPATH, &pszSavePath);
+                wcstombs(szSavePath, pszSavePath, MAX_PATH);
+                CoTaskMemFree(pszSavePath);
+                psi->lpVtbl->Release(psi);
+            }
+        }
+        pfsd->lpVtbl->Release(pfsd);
     }
 
-    // --- Calcular bytes ---
+    if (strlen(szSavePath) == 0) {
+		CoUninitialize();
+		return 0;
+	}
+
+	// --- Calcular bytes ---
 	init_tables();
     uint8_t data[4];
     solve_crc32(target_crc, data);
 
-    // --- Solicitar donde guardar ---
-    char szSaveFile[260] = "jtbeta.zip";
-    ofn.lpstrFile = szSaveFile;
-    ofn.lpstrFilter = "ZIP Files (*.zip)\0*.zip\0";
-    ofn.Flags = OFN_OVERWRITEPROMPT;
-
-    if (!GetSaveFileNameA(&ofn)) return 0;
-
-    FILE *f = fopen(szSaveFile, "wb");
+    FILE *f = fopen(szSavePath, "wb");
     if (!f) {
         MessageBoxA(NULL, "No se pudo crear el archivo 'jtbeta.zip'.", "Error", MB_ICONERROR);
-        return 1;
-    }
+    } else {
 
     // --- Local File Header ---
     uint8_t lfh[30];
@@ -245,9 +287,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     fclose(f);
 
-    char msg[300];
-    sprintf(msg, "Archivo 'jtbeta.zip' generado con \xE9xito.\nCRC procesado: %08X\nBytes: %02X %02X %02X %02X", target_crc, data[0], data[1], data[2], data[3]);
-    MessageBoxA(NULL, msg, "Finalizado", MB_OK | MB_ICONINFORMATION);
+    char finalMsg[256];
+    sprintf(finalMsg, "Archivo 'jtbeta.zip' generado con \xE9xito.\nCRC procesado: %08X\nBytes: %02X %02X %02X %02X", target_crc, data[0], data[1], data[2], data[3]);
+    MessageBoxA(NULL, finalMsg, "Finalizado", MB_OK | MB_ICONINFORMATION);
+	}
 
+	CoUninitialize();
     return 0;
 }
