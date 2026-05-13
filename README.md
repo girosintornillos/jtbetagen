@@ -8,7 +8,7 @@ Solo necesitas un compilador de C en Windows (GCC recomendado).
 
 PowerShell/CMD con MinGW:
 
-```gcc jtbetagen.c resource.res -o jtbetagen.exe -lcomdlg32 -mwindows```
+```gcc jtbetagen.c resource.res -o jtbetagen.exe -lole32 -luuid -lcomdlg32 -mwindows```
 <br/>
 <br/>
 Uso:
