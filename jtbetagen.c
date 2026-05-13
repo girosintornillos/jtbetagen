@@ -182,36 +182,49 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 		return 0;
 	}
 
-    // --- IFileSaveDialog para el ZIP (Forzando nombre) ---
-    IFileSaveDialog *pfsd = NULL;
-    hr = CoCreateInstance(&CLSID_FileSaveDialog, NULL, CLSCTX_ALL, &IID_IFileSaveDialog, (void**)&pfsd);
+	// --- IFileOpenDialog para el ZIP ---
+	hr = CoCreateInstance(&CLSID_FileOpenDialog, NULL, CLSCTX_ALL, &IID_IFileOpenDialog, (void**)&pfd);
     char szSavePath[MAX_PATH] = {0};
-    
-    if (SUCCEEDED(hr)) {
-        pfsd->lpVtbl->SetFileName(pfsd, L"jtbeta.zip"); // PRE-FIJAR EL NOMBRE
-        pfsd->lpVtbl->SetTitle(pfsd, L"D\xA2nde guardar jtbeta.zip?");
-        COMDLG_FILTERSPEC rgSpecZip[] = {{L"ZIP Files", L"*.zip"}};
-        pfsd->lpVtbl->SetFileTypes(pfsd, 1, rgSpecZip);
 
-        hr = pfsd->lpVtbl->Show(pfsd, NULL);
-        if (SUCCEEDED(hr)) {
-            IShellItem *psi = NULL;
-            hr = pfsd->lpVtbl->GetResult(pfsd, &psi);
-            if (SUCCEEDED(hr)) {
-                LPWSTR pszSavePath = NULL;
-                psi->lpVtbl->GetDisplayName(psi, SIGDN_FILESYSPATH, &pszSavePath);
-                wcstombs(szSavePath, pszSavePath, MAX_PATH);
-                CoTaskMemFree(pszSavePath);
-                psi->lpVtbl->Release(psi);
-            }
-        }
-        pfsd->lpVtbl->Release(pfsd);
-    }
+	if (SUCCEEDED(hr)) {
+		FILEOPENDIALOGOPTIONS dwOptions;
+		pfd->lpVtbl->GetOptions(pfd, &dwOptions);
+		pfd->lpVtbl->SetOptions(pfd, dwOptions | FOS_PICKFOLDERS);
+		pfd->lpVtbl->SetTitle(pfd, L"¿D\xF3nde guardar jtbeta.zip?");
+		
+		hr = pfd->lpVtbl->Show(pfd, NULL);
+		if (SUCCEEDED(hr)) {
+			IShellItem *psi = NULL;
+			hr = pfd->lpVtbl->GetResult(pfd, &psi);
+			if (SUCCEEDED(hr)) {
+				LPWSTR pszFolderPath = NULL;
+				psi->lpVtbl->GetDisplayName(psi, SIGDN_FILESYSPATH, &pszFolderPath);
+				wcstombs(szSavePath, pszFolderPath, MAX_PATH);
+				strcat(szSavePath, "\\jtbeta.zip"); // <--- Aquí se asegura el nombre
+				CoTaskMemFree(pszFolderPath);
+				psi->lpVtbl->Release(psi);
+			}
+		}
+		pfd->lpVtbl->Release(pfd);
+	}
 
     if (strlen(szSavePath) == 0) {
 		CoUninitialize();
 		return 0;
 	}
+
+	DWORD dwAttrib = GetFileAttributesA(szSavePath);
+    if (dwAttrib != INVALID_FILE_ATTRIBUTES && !(dwAttrib & FILE_ATTRIBUTE_DIRECTORY)) {
+        int response = MessageBoxA(NULL, 
+            "El archivo 'jtbeta.zip' ya existe en esta ubicaci\xF3n.\n\nDeseas reemplazarlo?", 
+            "Confirmar sobrescritura", 
+            MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2);
+        
+        if (response == IDNO) {
+            CoUninitialize();
+            return 0;
+        }
+    }
 
 	// --- Calcular bytes ---
 	init_tables();
