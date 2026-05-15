@@ -25,6 +25,13 @@
 #define TRZ_TIME 0xBC00
 #define TRZ_DATE 0x2198
 
+/* Layout del archivo ZIP generado */
+#define ZIP_LFH_SIZE   30
+#define ZIP_FNAME_LEN   8
+#define ZIP_FILE_SIZE   4
+#define ZIP_CD_OFFSET  (ZIP_LFH_SIZE + ZIP_FNAME_LEN + ZIP_FILE_SIZE)
+#define ZIP_CD_SIZE    54
+
 /* Tablas de búsqueda CRC-32 */
 static uint32_t table[256];
 static uint8_t  revT[256];
@@ -95,9 +102,9 @@ static void write_le16(uint8_t **p, uint16_t v) {
     *p += 2;
 }
 
-/* Conversión segura de caracteres anchos a ANSI mediante WideCharToMultiByte */
-static int wstr_to_ansi(const LPWSTR src, char *dst, int dst_size) {
-    int written = WideCharToMultiByte(CP_ACP, 0, src, -1, dst, dst_size, NULL, NULL);
+/* Conversión segura de caracteres anchos a UTF-8 mediante WideCharToMultiByte */
+static int wstr_to_utf8(const LPWSTR src, char *dst, int dst_size) {
+    int written = WideCharToMultiByte(CP_UTF8, 0, src, -1, dst, dst_size, NULL, NULL);
     return (written > 0) ? 1 : 0;
 }
 
@@ -106,7 +113,7 @@ static int get_crc_from_mra(const char *filename, uint32_t *target_crc) {
     FILE *f = fopen(filename, "r");
     if (!f) return 0;
 
-    char line[1024];
+    char line[4096];
     int found = 0;
 
     while (fgets(line, sizeof(line), f)) {
@@ -161,7 +168,7 @@ static int show_mra_dialog(char *out_path, uint32_t *out_crc) {
             LPWSTR pszFilePath = NULL;
             hr = psi->lpVtbl->GetDisplayName(psi, SIGDN_FILESYSPATH, &pszFilePath);
             if (SUCCEEDED(hr) && pszFilePath) {
-                if (wstr_to_ansi(pszFilePath, out_path, MAX_PATH)) {
+                if (wstr_to_utf8(pszFilePath, out_path, MAX_PATH)) {
                     if (get_crc_from_mra(out_path, out_crc)) {
                         result = 1;
                     } else {
@@ -202,12 +209,11 @@ static int show_folder_dialog(char *out_path) {
             LPWSTR pszFolderPath = NULL;
             hr = psi->lpVtbl->GetDisplayName(psi, SIGDN_FILESYSPATH, &pszFolderPath);
             if (SUCCEEDED(hr) && pszFolderPath) {
-                if (wstr_to_ansi(pszFolderPath, out_path, MAX_PATH)) {
-                    const char *suffix = "\\jtbeta.zip";
-                    size_t suffix_len  = strlen(suffix);
-                    size_t current_len = strlen(out_path);
-                    if (current_len + suffix_len < MAX_PATH) {
-                        strncat(out_path, suffix, MAX_PATH - current_len - 1);
+                if (wstr_to_utf8(pszFolderPath, out_path, MAX_PATH)) {
+                    char tmp[MAX_PATH];
+                    if (snprintf(tmp, MAX_PATH, "%s\\jtbeta.zip", out_path) < MAX_PATH) {
+                        strncpy(out_path, tmp, MAX_PATH - 1);
+                        out_path[MAX_PATH - 1] = '\0';
                         result = 1;
                     } else {
                         MessageBoxA(NULL,
@@ -225,18 +231,16 @@ static int show_folder_dialog(char *out_path) {
     return result;
 }
 
-/* Crea el archivo ZIP compatible con TorrentZip que contiene el archivo "beta.bin" cuyos 4 bytes generan el CRC-32 deseado. */
-static int build_zip(const char *out_path, uint32_t target_crc) {
+/* Construye el contenido del ZIP en memoria. Retorna el tamaño total en bytes */
+#define ZIP_BUF_SIZE (ZIP_LFH_SIZE + ZIP_FNAME_LEN + ZIP_FILE_SIZE + ZIP_CD_SIZE + 22 + 22)
+static size_t generate_zip_buffer(uint32_t target_crc, uint8_t *buf) {
     uint8_t data[4];
     solve_crc32(target_crc, data);
 
-    FILE *f = fopen(out_path, "wb");
-    if (!f) {
-        MessageBoxA(NULL, "No se pudo crear el archivo 'jtbeta.zip'.", "Error", MB_ICONERROR);
-        return 0;
-    }
+    uint8_t *p = buf;
 
-    uint8_t lfh[30];
+    /* Local File Header */
+    uint8_t lfh[ZIP_LFH_SIZE];
     uint8_t *ptr = lfh;
     write_le32(&ptr, 0x04034B50u);
     write_le16(&ptr, 10);
@@ -245,16 +249,16 @@ static int build_zip(const char *out_path, uint32_t target_crc) {
     write_le16(&ptr, TRZ_TIME);
     write_le16(&ptr, TRZ_DATE);
     write_le32(&ptr, target_crc);
-    write_le32(&ptr, 4);
-    write_le32(&ptr, 4);
-    write_le16(&ptr, 8);
+    write_le32(&ptr, ZIP_FILE_SIZE);
+    write_le32(&ptr, ZIP_FILE_SIZE);
+    write_le16(&ptr, ZIP_FNAME_LEN);	
     write_le16(&ptr, 0);
+    memcpy(p, lfh, ZIP_LFH_SIZE); p += ZIP_LFH_SIZE;
+    memcpy(p, "beta.bin", ZIP_FNAME_LEN); p += ZIP_FNAME_LEN;
+    memcpy(p, data, ZIP_FILE_SIZE); p += ZIP_FILE_SIZE;
 
-    fwrite(lfh, 1, 30, f);
-    fwrite("beta.bin", 1,  8, f);
-    fwrite(data, 1,  4, f);
-
-    uint8_t cd[54];
+    /* Central Directory */
+    uint8_t cd[ZIP_CD_SIZE];
     uint8_t *ptr_cd = cd;
     write_le32(&ptr_cd, 0x02014B50u);
     write_le16(&ptr_cd, 20);
@@ -264,19 +268,20 @@ static int build_zip(const char *out_path, uint32_t target_crc) {
     write_le16(&ptr_cd, TRZ_TIME);
     write_le16(&ptr_cd, TRZ_DATE);
     write_le32(&ptr_cd, target_crc);
-    write_le32(&ptr_cd, 4);
-    write_le32(&ptr_cd, 4);
-    write_le16(&ptr_cd, 8);
+    write_le32(&ptr_cd, ZIP_FILE_SIZE);
+    write_le32(&ptr_cd, ZIP_FILE_SIZE);
+    write_le16(&ptr_cd, ZIP_FNAME_LEN);
     write_le16(&ptr_cd, 0);
     write_le16(&ptr_cd, 0);
     write_le16(&ptr_cd, 0);
     write_le16(&ptr_cd, 0);
     write_le32(&ptr_cd, 0);
     write_le32(&ptr_cd, 0);
-    memcpy(ptr_cd, "beta.bin", 8);
-    ptr_cd += 8;
+    memcpy(ptr_cd, "beta.bin", ZIP_FNAME_LEN);
+    memcpy(p, cd, ZIP_CD_SIZE); p += ZIP_CD_SIZE;
 
-    uint32_t cd_crc = crc32_block(cd, 54);
+    /* End of Central Directory */
+    uint32_t cd_crc = crc32_block(cd, ZIP_CD_SIZE);
     char comment[23];
     snprintf(comment, sizeof(comment), "TORRENTZIPPED-%08X", cd_crc);
 
@@ -287,15 +292,37 @@ static int build_zip(const char *out_path, uint32_t target_crc) {
     write_le16(&ptr_e, 0);
     write_le16(&ptr_e, 1);
     write_le16(&ptr_e, 1);
-    write_le32(&ptr_e, 54);
-    write_le32(&ptr_e, 42);
+    write_le32(&ptr_e, ZIP_CD_SIZE);
+    write_le32(&ptr_e, ZIP_CD_OFFSET);
     write_le16(&ptr_e, 22);
+    memcpy(p, eocd, 22); p += 22;
+    memcpy(p, comment, 22); p += 22;	
 
-    fwrite(cd, 1, 54, f);
-    fwrite(eocd, 1, 22, f);
-    fwrite(comment, 1, 22, f);
+    return (size_t)(p - buf);
+}
 
+/* Crea el archivo ZIP compatible con TorrentZip que contiene el archivo "beta.bin" cuyos 4 bytes generan el CRC-32 deseado. */
+static int build_zip(const char *out_path, uint32_t target_crc) {
+    uint8_t buf[ZIP_BUF_SIZE];
+    size_t buf_len = generate_zip_buffer(target_crc, buf);
+
+    FILE *f = fopen(out_path, "wb");
+    if (!f) {
+        MessageBoxA(NULL, "No se pudo crear el archivo 'jtbeta.zip'.", "Error", MB_ICONERROR);
+        return 0;
+    }
+
+    size_t written = fwrite(buf, 1, buf_len, f);
     fclose(f);
+
+    if (written != buf_len) {
+        MessageBoxA(NULL, "Error de escritura al crear 'jtbeta.zip'.", "Error", MB_ICONERROR);
+        return 0;
+    }
+
+    /* Recuperar los 4 bytes calculados para el mensaje final */
+    uint8_t data[4];
+    solve_crc32(target_crc, data);
 
     char finalMsg[256];
     snprintf(finalMsg, sizeof(finalMsg),
